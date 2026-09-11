@@ -1,0 +1,51 @@
+name: Build SwitchBrowser NRO
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container: devkitpro/devkita64:latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Build
+      working-directory: SwitchBrowser
+      run: |
+        export DEVKITPRO=/opt/devkitpro
+        export DEVKITA64=$DEVKITPRO/devkitA64
+        make -j$(nproc) TARGET=SwitchBrowser
+        # If make fails, try manual build
+        if [ ! -f SwitchBrowser.nro ]; then
+          cd source
+          $DEVKITA64/bin/aarch64-none-elf-gcc -c -g -Wall -O2 \
+            -ffunction-sections -fdata-sections \
+            -march=armv8-a+crc+crypto -mtune=cortex-a57 -mtp=soft -fPIE \
+            -D__SWITCH__ \
+            -I../include -I$DEVKITPRO/libnx/include -I$DEVKITPRO/libnx/external/bsd/include \
+            -I$DEVKITPRO/portlibs/switch/include \
+            -isystem $DEVKITA64/aarch64-none-elf/include \
+            main.c browser.c bookmarks.c history.c ui.c
+          
+          $DEVKITA64/bin/aarch64-none-elf-gcc -o SwitchBrowser.elf *.o \
+            -specs=$DEVKITPRO/libnx/switch.specs \
+            -march=armv8-a+crc+crypto -mtune=cortex-a57 -mtp=soft -fPIE \
+            -L$DEVKITPRO/libnx/lib -L$DEVKITPRO/portlibs/switch/lib \
+            -lnx -lc -lm -lgcc
+          
+          $DEVKITPRO/tools/bin/elf2nro SwitchBrowser.elf SwitchBrowser.nro
+        fi
+    
+    - name: Upload NRO
+      uses: actions/upload-artifact@v4
+      with:
+        name: SwitchBrowser-NRO
+        path: SwitchBrowser/SwitchBrowser.nro
+        if-no-files-found: error
