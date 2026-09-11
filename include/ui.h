@@ -3,25 +3,23 @@
 
 #include "types.h"
 
-// Colors (RGB)
-#define COL_BG       0x121212
-#define COL_CARD     0x1E1E1E
-#define COL_CARD_HL  0x2D2D2D
-#define COL_ACCENT   0x2196F3
-#define COL_ACCENT_D 0x1976D2
-#define COL_TEXT      0xFFFFFF
-#define COL_TEXT_DIM  0x9E9E9E
-#define COL_SUCCESS   0x4CAF50
-#define COL_ERROR     0xF44336
-#define COL_WHITE     0xFFFFFF
-#define COL_TRANSP    0x00000001
+#define COL_BG       0x1A1A2E
+#define COL_CARD     0x2D2D44
+#define COL_CARD_HL  0x3D3D5C
+#define COL_ACCENT   0x4FC3F7
+#define COL_ACCENT_D 0x29B6F6
+#define COL_TEXT     0xFFFFFF
+#define COL_TEXT_DIM 0xB0B0C0
+#define COL_SUCCESS  0x66BB6A
+#define COL_ERROR    0xEF5350
+#define COL_WARNING  0xFFCA28
+#define COL_LINK     0x64B5F6
 
-// Layout
 #define TOP_BAR_H    72
-#define BOT_BAR_H    64
-#define CARD_H       80
-#define CARD_MARGIN  12
+#define BOT_BAR_H    56
 #define PADDING      24
+
+typedef struct { int x, y, w, h; } UIRect;
 
 bool ui_init(UIContext* ctx);
 void ui_exit(UIContext* ctx);
@@ -34,19 +32,13 @@ void ui_draw_text_wrapped(UIContext* ctx, const char* text, int x, int y, int ma
 int ui_text_width(UIContext* ctx, const char* text, int size);
 void ui_present(UIContext* ctx);
 
-// UI components
-typedef struct { int x, y, w, h; } UIRect;
-
 bool ui_button(UIContext* ctx, UIRect r, const char* text, bool selected);
-bool ui_card(UIContext* ctx, UIRect r, const char* title, const char* subtitle, bool selected);
+void ui_top_bar(UIContext* ctx, const char* title, const char* subtitle);
+void ui_bottom_bar(UIContext* ctx, const char* text);
 void ui_input_box(UIContext* ctx, UIRect r, const char* text, bool focused);
+bool ui_quick_link_card(UIContext* ctx, UIRect r, const char* name, const char* url, bool selected);
 void ui_progress_bar(UIContext* ctx, UIRect r, float progress);
-void ui_top_bar(UIContext* ctx, const char* title);
-void ui_bottom_bar(UIContext* ctx, int selected_tab);
-void ui_draw_icon_globe(UIContext* ctx, int cx, int cy, int r, u32 color);
 
-// Input helpers
-bool rect_contains(UIRect r, int x, int y);
 u64 pad_get_keys(PadState* pad);
 
 #endif

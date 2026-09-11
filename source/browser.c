@@ -12,9 +12,8 @@ bool browser_is_url(const char* text) {
     if (!text) return false;
     if (strncmp(text, "http://", 7) == 0) return true;
     if (strncmp(text, "https://", 8) == 0) return true;
-    // Check for domain-like pattern
     const char* dot = strchr(text, '.');
-    if (dot && dot != text && dot[1] != '\0') return true;
+    if (dot && dot != text && dot[1] != '\0' && dot[1] != '/') return true;
     return false;
 }
 
@@ -32,7 +31,7 @@ void browser_normalize_url(char* url, size_t size) {
 
 void browser_build_search_url(char* out, size_t out_size, const char* query, const char* engine) {
     if (!engine || !engine[0])
-        engine = "https://www.google.com/search?q=";
+        engine = "https://www.baidu.com/s?wd=";
 
     char encoded[1024];
     int ei = 0;
@@ -72,37 +71,4 @@ bool browser_input_text(char* out_text, size_t out_size, const char* header, con
 
 bool browser_input_url(char* out_url, size_t out_size, const char* initial_text) {
     return browser_input_text(out_url, out_size, "Enter URL or Search", initial_text ? initial_text : "https://");
-}
-
-bool browser_navigate(const char* url, char* last_url, size_t last_url_size) {
-    WebCommonConfig config;
-    WebCommonReply reply;
-    Result rc;
-
-    if (last_url && last_url_size > 0)
-        last_url[0] = 0;
-
-    memset(&config, 0, sizeof(config));
-    memset(&reply, 0, sizeof(reply));
-
-    rc = webPageCreate(&config, url);
-    if (R_FAILED(rc)) return false;
-
-    webConfigSetPointer(&config, true);
-    webConfigSetLeftStickMode(&config, WebLeftStickMode_Pointer);
-    webConfigSetTouchEnabledOnContents(&config, true);
-    webConfigSetFooter(&config, true);
-    webConfigSetWhitelist(&config, ".*");
-
-    rc = webConfigShow(&config, &reply);
-    if (R_FAILED(rc)) return false;
-
-    WebExitReason exitReason;
-    rc = webReplyGetExitReason(&reply, &exitReason);
-    if (R_SUCCEEDED(rc) && exitReason == WebExitReason_LastUrl && last_url) {
-        size_t out_size_val = 0;
-        webReplyGetLastUrl(&reply, last_url, last_url_size, &out_size_val);
-    }
-
-    return true;
 }

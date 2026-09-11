@@ -10,17 +10,19 @@
 
 #define MAX_URL_LEN     512
 #define MAX_BOOKMARKS  50
-#define MAX_HISTORY     100
 #define MAX_TEXT_LEN   256
+#define MAX_PAGE_LINES 200
+#define MAX_LINE_LEN   120
+#define MAX_LINKS      50
 
 typedef enum {
     STATE_HOME = 0,
     STATE_URL_INPUT,
     STATE_BOOKMARKS,
-    STATE_HISTORY,
     STATE_SETTINGS,
-    STATE_BROWSING,
-    STATE_ABOUT
+    STATE_LOADING,
+    STATE_PAGE_VIEW,
+    STATE_ERROR
 } AppState;
 
 typedef struct {
@@ -29,16 +31,28 @@ typedef struct {
 } Bookmark;
 
 typedef struct {
+    char text[MAX_LINE_LEN];
+    int link_idx;
+} PageLine;
+
+typedef struct {
+    char text[MAX_LINE_LEN];
     char url[MAX_URL_LEN];
-    u64 timestamp;
-} HistoryEntry;
+} PageLink;
+
+typedef struct {
+    char title[MAX_TEXT_LEN];
+    PageLine lines[MAX_PAGE_LINES];
+    int line_count;
+    PageLink links[MAX_LINKS];
+    int link_count;
+    int http_status;
+    char error_msg[MAX_TEXT_LEN];
+} PageContent;
 
 typedef struct {
     char homepage[MAX_URL_LEN];
     char search_engine[MAX_URL_LEN];
-    bool enable_js;
-    bool enable_touch;
-    bool enable_pointer;
 } BrowserConfig;
 
 typedef struct {
@@ -47,7 +61,6 @@ typedef struct {
     TTF_Font* font;
     TTF_Font* font_small;
     TTF_Font* font_large;
-    SDL_Joystick* joystick;
     PadState pad;
     bool applet_mode;
     bool needs_redraw;
@@ -60,11 +73,10 @@ typedef struct {
     BrowserConfig config;
     Bookmark bookmarks[MAX_BOOKMARKS];
     int bookmark_count;
-    HistoryEntry history[MAX_HISTORY];
-    int history_count;
     char current_url[MAX_URL_LEN];
-    char last_url[MAX_URL_LEN];
-    int selected_idx;
+    char current_title[MAX_TEXT_LEN];
+    PageContent page;
+    int selected_link;
     int scroll_offset;
     bool exit_app;
 } AppContext;

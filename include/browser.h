@@ -4,7 +4,6 @@
 #include "types.h"
 
 bool browser_check_applet_mode(void);
-bool browser_navigate(const char* url, char* last_url, size_t last_url_size);
 bool browser_input_url(char* out_url, size_t out_size, const char* initial_text);
 bool browser_input_text(char* out_text, size_t out_size, const char* header, const char* initial);
 void browser_normalize_url(char* url, size_t size);
