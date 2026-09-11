@@ -17,7 +17,6 @@ jobs:
       uses: actions/checkout@v4
       
     - name: Build
-      working-directory: SwitchBrowser
       run: |
         export DEVKITPRO=/opt/devkitpro
         export DEVKITA64=$DEVKITPRO/devkitA64
@@ -47,5 +46,5 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: SwitchBrowser-NRO
-        path: SwitchBrowser/SwitchBrowser.nro
+        path: SwitchBrowser.nro
         if-no-files-found: error
