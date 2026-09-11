@@ -6,6 +6,8 @@
 #include <SDL2/SDL.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <sys/types.h>
 
 #define APP_TITLE "SwitchBrowser"
 #define APP_VERSION "2.0.0"

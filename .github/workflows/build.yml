@@ -16,16 +16,7 @@ jobs:
     
     - name: Install dependencies
       run: |
-        dkp-pacman -Sy --noconfirm switch-sdl2 switch-sdl2_ttf switch-freetype switch-libpng switch-libjpeg-turbo switch-zlib 2>/dev/null || \
-        dkp-pacman -Sy --noconfirm switch-sdl2 switch-sdl2_ttf 2>/dev/null || \
-        dkp-pacman -Sy --noconfirm sdl2 sdl2_ttf 2>/dev/null || \
-        echo "Trying with pre-installed packages"
-    
-    - name: List available packages
-      run: |
-        dkp-pacman -Q | grep -i sdl || true
-        dkp-pacman -Q | grep -i ttf || true
-        dkp-pacman -Q | grep -i freetype || true
+        dkp-pacman -Sy --noconfirm switch-sdl2 switch-sdl2_ttf switch-freetype switch-libpng switch-libjpeg-turbo switch-zlib
     
     - name: Build
       run: |
