@@ -1,157 +1,303 @@
-#include <string.h>
-#include <stdio.h>
-#include <switch.h>
-
 #include "ui.h"
-#include "types.h"
+#include <switch.h>
+#include <SDL2/SDL.h>
+#include <SDL2/SDL_ttf.h>
+#include <stdio.h>
+#include <string.h>
+#include <math.h>
 
-#define CONSOLE_WIDTH 80
-
-void ui_print_centered(int row, const char *text) {
-    int len = (int)strlen(text);
-    int x = (CONSOLE_WIDTH - len) / 2;
-    if (x < 0) x = 0;
-    printf("\x1b[%d;%dH%s", row, x, text);
+static u32 rgb(u8 r, u8 g, u8 b, u8 a) {
+    return ((u32)a << 24) | ((u32)r << 16) | ((u32)g << 8) | b;
 }
 
-void ui_clear_line(int row) {
-    printf("\x1b[%d;1H%*s", row, CONSOLE_WIDTH, "");
+static void set_color(UIContext* ctx, u32 c) {
+    SDL_SetRenderDrawColor(ctx->renderer, (c >> 16) & 0xFF, (c >> 8) & 0xFF, c & 0xFF, (c >> 24) & 0xFF);
 }
 
-void ui_draw_header(const char *subtitle) {
-    consoleClear();
-    printf("\n");
-    ui_print_centered(1, "========================================");
-    ui_print_centered(2, "        SwitchBrowser v" APP_VERSION "        ");
-    ui_print_centered(3, "========================================");
-    if (subtitle) {
-        ui_print_centered(4, subtitle);
+bool ui_init(UIContext* ctx) {
+    memset(ctx, 0, sizeof(UIContext));
+
+    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_JOYSTICK) < 0) return false;
+    if (TTF_Init() < 0) return false;
+
+    romfsInit();
+    plInitialize(PlServiceType_User);
+
+    if (SDL_CreateWindowAndRenderer(SCREEN_WIDTH, SCREEN_HEIGHT, SDL_WINDOW_FULLSCREEN, &ctx->window, &ctx->renderer) < 0)
+        return false;
+
+    SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "1");
+
+    // Load Switch shared font
+    PlFontData font_data;
+    Result rc = plGetSharedFont(PlSharedFontType_Standard, &font_data);
+    if (R_FAILED(rc)) return false;
+
+    SDL_RWops* rw = SDL_RWFromMem(font_data.address, font_data.size);
+    ctx->font = TTF_OpenFontRW(rw, 0, 18);
+    ctx->font_small = TTF_OpenFontRW(SDL_RWFromMem(font_data.address, font_data.size), 0, 14);
+    ctx->font_large = TTF_OpenFontRW(SDL_RWFromMem(font_data.address, font_data.size), 0, 24);
+
+    if (!ctx->font || !ctx->font_small || !ctx->font_large) return false;
+
+    // Joystick
+    SDL_JoystickEventState(SDL_ENABLE);
+    ctx->joystick = SDL_JoystickOpen(0);
+
+    // Pad
+    padConfigureInput(1, HidNpadStyleSet_NpadStandard);
+    padInitializeDefault(&ctx->pad);
+
+    // Check if running in applet mode (from album/hbmenu)
+    AppletType at = appletGetAppletType();
+    ctx->applet_mode = (at == AppletType_LibraryApplet ||
+                        at == AppletType_LibraryAppletPhotoViewer ||
+                        at != AppletType_Application);
+
+    ctx->needs_redraw = true;
+    return true;
+}
+
+void ui_exit(UIContext* ctx) {
+    if (ctx->font) TTF_CloseFont(ctx->font);
+    if (ctx->font_small) TTF_CloseFont(ctx->font_small);
+    if (ctx->font_large) TTF_CloseFont(ctx->font_large);
+    if (ctx->joystick) SDL_JoystickClose(ctx->joystick);
+    plExit();
+    romfsExit();
+    TTF_Quit();
+    SDL_Quit();
+}
+
+void ui_clear(UIContext* ctx, u32 color) {
+    set_color(ctx, color);
+    SDL_RenderClear(ctx->renderer);
+}
+
+void ui_fill_rect(UIContext* ctx, int x, int y, int w, int h, u32 color) {
+    set_color(ctx, color);
+    SDL_Rect r = {x, y, w, h};
+    SDL_RenderFillRect(ctx->renderer, &r);
+}
+
+void ui_fill_rounded_rect(UIContext* ctx, int x, int y, int w, int h, int r, u32 color) {
+    set_color(ctx, color);
+    SDL_Rect rects[] = {
+        {x + r, y, w - 2*r, r},         // top
+        {x + r, y + h - r, w - 2*r, r},  // bottom
+        {x, y + r, w, h - 2*r},          // middle
+        {x, y + r, r, h - 2*r},          // left
+        {x + w - r, y + r, r, h - 2*r},  // right
+    };
+    SDL_RenderFillRects(ctx->renderer, rects, 5);
+
+    // Corners
+    for (int dy = 0; dy <= r; dy++) {
+        int dx = (int)sqrtf((float)(r*r - dy*dy));
+        SDL_Rect top_l = {x + r - dx, y + r - dy, dx + dx, 1};
+        SDL_Rect bot_l = {x + r - dx, y + h - r + dy - 1, dx + dx, 1};
+        SDL_RenderFillRects(ctx->renderer, (SDL_Rect[]){top_l, bot_l}, 2);
     }
-    printf("\n");
 }
 
-void ui_draw_main_menu(AppContext *ctx) {
-    ui_draw_header("Nintendo Switch Web Browser");
+static TTF_Font* get_font(UIContext* ctx, int size) {
+    if (size <= 14) return ctx->font_small;
+    if (size >= 24) return ctx->font_large;
+    return ctx->font;
+}
 
-    printf("\n");
-    printf("  [A] Enter URL / Search\n");
-    printf("  [B] Bookmarks\n");
-    printf("  [Y] History\n");
-    printf("  [X] Settings\n");
-    printf("\n");
-    printf("  --- Quick Access ---\n\n");
+void ui_draw_text(UIContext* ctx, const char* text, int x, int y, int size, u32 color) {
+    if (!text || !text[0]) return;
+    TTF_Font* font = get_font(ctx, size);
+    if (!font) return;
 
-    Bookmark defaults[12];
-    int dcount = 0;
-    extern void bookmarks_get_defaults(Bookmark*, int*, int);
-    bookmarks_get_defaults(defaults, &dcount, 12);
+    SDL_Color c = {(color >> 16) & 0xFF, (color >> 8) & 0xFF, color & 0xFF, (color >> 24) & 0xFF};
+    if (c.a == 0) c.a = 0xFF;
 
-    int row = 13;
-    int col = 0;
-    for (int i = 0; i < dcount && i < 8; i++) {
-        printf("\x1b[%d;%dH [%d] %-20s", row, col * 26 + 2, i + 1, defaults[i].title);
-        col++;
-        if (col >= 3) {
-            col = 0;
-            row++;
+    SDL_Surface* surface = TTF_RenderUTF8_Blended(font, text, c);
+    if (!surface) return;
+
+    SDL_Texture* tex = SDL_CreateTextureFromSurface(ctx->renderer, surface);
+    if (tex) {
+        SDL_Rect dst = {x, y, surface->w, surface->h};
+        SDL_RenderCopy(ctx->renderer, tex, NULL, &dst);
+        SDL_DestroyTexture(tex);
+    }
+    SDL_FreeSurface(surface);
+}
+
+void ui_draw_text_centered(UIContext* ctx, const char* text, int x, int y, int w, int size, u32 color) {
+    TTF_Font* font = get_font(ctx, size);
+    if (!font || !text) return;
+
+    int tw, th;
+    TTF_SizeUTF8(font, text, &tw, &th);
+    ui_draw_text(ctx, text, x + (w - tw) / 2, y, size, color);
+}
+
+void ui_draw_text_wrapped(UIContext* ctx, const char* text, int x, int y, int max_w, int size, u32 color) {
+    TTF_Font* font = get_font(ctx, size);
+    if (!font || !text) return;
+
+    int line_h = TTF_FontHeight(font) + 2;
+    char buf[512];
+    strncpy(buf, text, sizeof(buf) - 1);
+    buf[sizeof(buf) - 1] = 0;
+
+    char* line = strtok(buf, "\n");
+    int yy = y;
+    while (line) {
+        int tw, th;
+        TTF_SizeUTF8(font, line, &tw, &th);
+        if (tw <= max_w) {
+            ui_draw_text(ctx, line, x, yy, size, color);
+            yy += line_h;
+        } else {
+            // Word wrap
+            char word[256];
+            char current[512] = "";
+            char* tok = strtok(line, " ");
+            while (tok) {
+                char test[768];
+                snprintf(test, sizeof(test), "%s %s", current, tok);
+                TTF_SizeUTF8(font, test, &tw, &th);
+                if (tw > max_w && current[0]) {
+                    ui_draw_text(ctx, current, x, yy, size, color);
+                    yy += line_h;
+                    strncpy(current, tok, sizeof(current) - 1);
+                } else {
+                    if (current[0]) {
+                        strncat(current, " ", sizeof(current) - strlen(current) - 1);
+                    }
+                    strncat(current, tok, sizeof(current) - strlen(current) - 1);
+                }
+                tok = strtok(NULL, " ");
+            }
+            if (current[0]) {
+                ui_draw_text(ctx, current, x, yy, size, color);
+                yy += line_h;
+            }
+        }
+        line = strtok(NULL, "\n");
+    }
+}
+
+int ui_text_width(UIContext* ctx, const char* text, int size) {
+    TTF_Font* font = get_font(ctx, size);
+    if (!font || !text) return 0;
+    int w, h;
+    TTF_SizeUTF8(font, text, &w, &h);
+    return w;
+}
+
+void ui_present(UIContext* ctx) {
+    SDL_RenderPresent(ctx->renderer);
+}
+
+// --- Components ---
+
+bool ui_button(UIContext* ctx, UIRect r, const char* text, bool selected) {
+    u32 bg = selected ? COL_ACCENT : COL_CARD;
+    if (selected) {
+        ui_fill_rounded_rect(ctx, r.x - 2, r.y - 2, r.w + 4, r.h + 4, 12, COL_ACCENT_D);
+    }
+    ui_fill_rounded_rect(ctx, r.x, r.y, r.w, r.h, 10, bg);
+    ui_draw_text_centered(ctx, text, r.x, r.y + (r.h - 18) / 2, r.w, 18, COL_TEXT);
+    return selected;
+}
+
+bool ui_card(UIContext* ctx, UIRect r, const char* title, const char* subtitle, bool selected) {
+    u32 bg = selected ? COL_CARD_HL : COL_CARD;
+    if (selected) {
+        ui_fill_rounded_rect(ctx, r.x - 2, r.y - 2, r.w + 4, r.h + 4, 14, COL_ACCENT_D);
+    }
+    ui_fill_rounded_rect(ctx, r.x, r.y, r.w, r.h, 12, bg);
+
+    // Icon circle
+    int icon_r = 20;
+    int cx = r.x + 28 + icon_r;
+    int cy = r.y + r.h / 2;
+    set_color(ctx, COL_ACCENT);
+    SDL_Rect icon_bg = {cx - icon_r, cy - icon_r, icon_r * 2, icon_r * 2};
+    SDL_RenderFillRect(ctx->renderer, &icon_bg);
+
+    // Title and subtitle
+    ui_draw_text(ctx, title, r.x + 70, r.y + 14, 18, COL_TEXT);
+    if (subtitle && subtitle[0]) {
+        ui_draw_text(ctx, subtitle, r.x + 70, r.y + 40, 14, COL_TEXT_DIM);
+    }
+    return selected;
+}
+
+void ui_input_box(UIContext* ctx, UIRect r, const char* text, bool focused) {
+    u32 border = focused ? COL_ACCENT : COL_CARD_HL;
+    ui_fill_rounded_rect(ctx, r.x, r.y, r.w, r.h, 10, COL_CARD);
+    // Border
+    set_color(ctx, border);
+    SDL_RenderDrawRect(ctx->renderer, &(SDL_Rect){r.x, r.y, r.w, r.h});
+
+    if (text && text[0]) {
+        ui_draw_text(ctx, text, r.x + 16, r.y + (r.h - 18) / 2, 18, COL_TEXT);
+    } else {
+        ui_draw_text(ctx, "Search or type URL", r.x + 16, r.y + (r.h - 14) / 2, 14, COL_TEXT_DIM);
+    }
+}
+
+void ui_progress_bar(UIContext* ctx, UIRect r, float progress) {
+    ui_fill_rounded_rect(ctx, r.x, r.y, r.w, r.h, 4, COL_CARD);
+    int fill_w = (int)(r.w * progress);
+    if (fill_w > 0) {
+        ui_fill_rounded_rect(ctx, r.x, r.y, fill_w, r.h, 4, COL_ACCENT);
+    }
+}
+
+void ui_top_bar(UIContext* ctx, const char* title) {
+    ui_fill_rect(ctx, 0, 0, SCREEN_WIDTH, TOP_BAR_H, COL_BG);
+    ui_draw_text(ctx, title, PADDING, (TOP_BAR_H - 24) / 2, 24, COL_TEXT);
+    // Accent line
+    ui_fill_rect(ctx, 0, TOP_BAR_H - 2, SCREEN_WIDTH, 2, COL_ACCENT);
+}
+
+void ui_bottom_bar(UIContext* ctx, int selected_tab) {
+    int y = SCREEN_HEIGHT - BOT_BAR_H;
+    ui_fill_rect(ctx, 0, y, SCREEN_WIDTH, BOT_BAR_H, COL_CARD);
+    ui_fill_rect(ctx, 0, y, SCREEN_WIDTH, 1, COL_CARD_HL);
+
+    const char* labels[] = {"Home", "Bookmarks", "History", "Settings"};
+    int tab_w = SCREEN_WIDTH / 4;
+    for (int i = 0; i < 4; i++) {
+        int tx = i * tab_w + tab_w / 2;
+        u32 color = (i == selected_tab) ? COL_ACCENT : COL_TEXT_DIM;
+        ui_draw_text_centered(ctx, labels[i], i * tab_w, y + (BOT_BAR_H - 18) / 2, tab_w, 18, color);
+        if (i == selected_tab) {
+            int tw = ui_text_width(ctx, labels[i], 18);
+            ui_fill_rect(ctx, tx - tw / 2, y + BOT_BAR_H - 4, tw, 3, COL_ACCENT);
         }
     }
+}
 
-    printf("\n\n");
-    printf("  --- Current Session ---\n");
-    if (ctx->last_url[0]) {
-        printf("  Last visited: %.70s\n", ctx->last_url);
-    } else {
-        printf("  Last visited: (none)\n");
+void ui_draw_icon_globe(UIContext* ctx, int cx, int cy, int r, u32 color) {
+    set_color(ctx, color);
+    // Circle
+    for (int dy = -r; dy <= r; dy++) {
+        int dx = (int)sqrtf((float)(r*r - dy*dy));
+        SDL_RenderDrawLine(ctx->renderer, cx - dx, cy + dy, cx + dx, cy + dy);
     }
-
-    ui_draw_status_bar("[+] Exit  [A] URL  [B] Bookmarks  [Y] History  [X] Settings");
-}
-
-void ui_draw_bookmarks(AppContext *ctx) {
-    ui_draw_header("Bookmarks");
-
-    if (ctx->bookmark_count == 0) {
-        printf("\n  No bookmarks saved.\n\n");
-        printf("  Visit a page and add it to bookmarks.\n");
-    } else {
-        printf("  %-3s  %-25s  %s\n", "#", "Title", "URL");
-        printf("  %-3s  %-25s  %s\n", "---", "-------------------------", "----------");
-
-        int start = ctx->scroll_offset;
-        int max_display = 18;
-
-        for (int i = start; i < ctx->bookmark_count && i < start + max_display; i++) {
-            const char *cursor = (i == ctx->selected_idx) ? ">>" : "  ";
-            printf("%s[%2d] %-25.25s  %.45s\n", cursor, i + 1,
-                   ctx->bookmarks[i].title, ctx->bookmarks[i].url);
-        }
+    // Meridians
+    set_color(ctx, COL_BG);
+    SDL_RenderDrawLine(ctx->renderer, cx, cy - r, cx, cy + r);
+    int r2 = r * 3 / 4;
+    for (int dy = -r2; dy <= r2; dy += 4) {
+        int dx = (int)sqrtf((float)(r2*r2 - dy*dy));
+        SDL_RenderDrawLine(ctx->renderer, cx - dx, cy + dy, cx + dx, cy + dy);
     }
-
-    ui_draw_status_bar("[A] Open  [X] Add Current  [Y] Delete  [B]/[+] Back");
 }
 
-void ui_draw_history(AppContext *ctx) {
-    ui_draw_header("Browsing History");
-
-    if (ctx->history_count == 0) {
-        printf("\n  No browsing history.\n\n");
-        printf("  Start browsing to build history.\n");
-    } else {
-        printf("  %-3s  %-25s  %s\n", "#", "Title", "URL");
-        printf("  %-3s  %-25s  %s\n", "---", "-------------------------", "----------");
-
-        int start = ctx->scroll_offset;
-        int max_display = 18;
-
-        for (int i = start; i < ctx->history_count && i < start + max_display; i++) {
-            const char *cursor = (i == ctx->selected_idx) ? ">>" : "  ";
-            printf("%s[%2d] %-25.25s  %.45s\n", cursor, i + 1,
-                   ctx->history[i].title, ctx->history[i].url);
-        }
-    }
-
-    ui_draw_status_bar("[A] Open  [X] Clear All  [B]/[+] Back");
+bool rect_contains(UIRect r, int x, int y) {
+    return x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h;
 }
 
-void ui_draw_settings(AppContext *ctx) {
-    ui_draw_header("Settings");
-
-    printf("\n");
-    printf("  Homepage:    %s\n", ctx->config.homepage);
-    printf("  Search engine: %s\n", ctx->config.search_engine);
-    printf("\n");
-    printf("  --- Web Engine Options ---\n\n");
-    printf("  [1] JavaScript Extensions: %s\n", ctx->config.enable_js ? "ON" : "OFF");
-    printf("  [2] Touch on Content:      %s\n", ctx->config.enable_touch ? "ON" : "OFF");
-    printf("  [3] Pointer (Stick Mouse): %s\n", ctx->config.enable_pointer ? "ON" : "OFF");
-    printf("  [4] Page Cache:            %s\n", ctx->config.enable_cache ? "ON" : "OFF");
-    printf("  [5] Web Audio:             %s\n", ctx->config.enable_audio ? "ON" : "OFF");
-    printf("\n");
-    printf("  [R] Reset to Defaults\n");
-
-    ui_draw_status_bar("[1-5] Toggle  [A] Edit Homepage  [B]/[+] Back");
-}
-
-void ui_draw_about(void) {
-    ui_draw_header("About");
-
-    printf("\n\n");
-    ui_print_centered(8, APP_TITLE " v" APP_VERSION);
-    printf("\n\n");
-    ui_print_centered(11, "A web browser for Nintendo Switch");
-    ui_print_centered(12, "Powered by Switch WebKit Applet");
-    printf("\n\n");
-    ui_print_centered(15, "Uses libnx web applet API");
-    ui_print_centered(16, "Full HTML5 / CSS / JavaScript support");
-    printf("\n\n");
-    ui_print_centered(19, "Built with devkitPro + libnx");
-    printf("\n\n");
-    ui_print_centered(22, "[B] / [+] Back");
-}
-
-void ui_draw_status_bar(const char *hint) {
-    printf("\n");
-    printf("\x1b[30;1H\033[44m%-*s\033[0m", CONSOLE_WIDTH, "");
-    printf("\x1b[30;1H\033[44m%s\033[0m", hint ? hint : "");
+u64 pad_get_keys(PadState* pad) {
+    padUpdate(pad);
+    return padGetButtonsDown(pad);
 }

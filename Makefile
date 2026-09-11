@@ -7,12 +7,11 @@ TOPDIR ?= $(CURDIR)
 include $(DEVKITPRO)/libnx/switch_rules
 
 TARGET		:=	SwitchBrowser
-BUILD        :=	build
+BUILD		:=	build
 SOURCES      :=	source
 DATA         :=	data
 INCLUDES     :=	include
-EXEFS_SRC    :=	exefs_src
-#ROMFS	:=	romfs
+ROMFS	:=	romfs
 
 ARCH	:=	-march=armv8-a+crc+crypto -mtune=cortex-a57 -mtp=soft -fPIE
 
@@ -25,15 +24,18 @@ CXXFLAGS	:= $(CFLAGS) -fno-rtti -fno-exceptions
 ASFLAGS	:=	-g $(ARCH)
 LDFLAGS	=	-specs=$(DEVKITPRO)/libnx/switch.specs -g $(ARCH) -Wl,-Map,$(notdir $*.map)
 
-LIBS	:= -lnx
+LIBS	:= -lSDL2_ttf -lSDL2 -lfreetype -lpng -ljpeg -lz -lnx -lm
 
-LIBDIRS	:= $(LIBNX)
+LIBDIRS	:= $(PORTLIBS) $(LIBNX)
 
 ifneq ($(BUILD),$(notdir $(CURDIR)))
+
 export OUTPUT	:=	$(CURDIR)/$(TARGET)
 export TOPDIR	:=	$(CURDIR)
+
 export VPATH	:=	$(foreach dir,$(SOURCES),$(CURDIR)/$(dir)) \
 			$(foreach dir,$(DATA),$(CURDIR)/$(dir))
+
 export DEPSDIR	:=	$(CURDIR)/$(BUILD)
 
 CFILES		:=	$(foreach dir,$(SOURCES),$(notdir $(wildcard $(dir)/*.c)))
@@ -58,16 +60,6 @@ export INCLUDE	:=	$(foreach dir,$(INCLUDES),-I$(CURDIR)/$(dir)) \
 
 export LIBPATHS	:=	$(foreach dir,$(LIBDIRS),-L$(dir)/lib)
 
-export BUILD_EXEFS_SRC := $(TOPDIR)/$(EXEFS_SRC)
-
-ifeq ($(strip $(ICON)),)
-	export APP_ICON := $(LIBNX)/default_icon.jpg
-endif
-
-ifeq ($(strip $(NO_NACP)),)
-	export NROFLAGS += --icon=$(APP_ICON) --nacp=$(CURDIR)/$(TARGET).nacp
-endif
-
 .PHONY: $(BUILD) clean all
 
 all: $(BUILD)
@@ -78,26 +70,28 @@ $(BUILD):
 
 clean:
 	@echo clean ...
-	@rm -fr $(BUILD) $(TARGET).pfs0 $(TARGET).nso $(TARGET).nro $(TARGET).nacp $(TARGET).elf
+	@rm -fr $(BUILD) $(TARGET).nro $(TARGET).nacp $(TARGET).elf
 
 else
 .PHONY:	all
 
 DEPENDS	:=	$(OFILES:.o=.d)
 
-all	:	$(OUTPUT).pfs0 $(OUTPUT).nro
+all	:	$(OUTPUT).nro
 
-$(OUTPUT).pfs0	:	$(OUTPUT).nso
-$(OUTPUT).nso	:	$(OUTPUT).elf
-
-ifeq ($(strip $(NO_NACP)),)
-$(OUTPUT).nro	:	$(OUTPUT).elf $(OUTPUT).nacp
+ifeq (,$(wildcard $(TOPDIR)/icon.jpg))
+ICON_ARG :=
 else
-$(OUTPUT).nro	:	$(OUTPUT).elf
+ICON_ARG := --icon=$(TOPDIR)/icon.jpg
 endif
 
+$(OUTPUT).nro	:	$(OUTPUT).elf
+	@echo building $(notdir $@)
+	elf2nro $(OUTPUT).elf $(OUTPUT).nro $(ICON_ARG)
+
 $(OUTPUT).elf	:	$(OFILES)
-$(OFILES_SRC)	: $(HFILES_BIN)
+	@echo linking $(notdir $@)
+	$(LD) $(LDFLAGS) $(OFILES) $(LIBPATHS) $(LIBS) -o $@
 
 -include $(DEPENDS)
 
