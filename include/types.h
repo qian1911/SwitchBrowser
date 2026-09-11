@@ -77,6 +77,7 @@ typedef struct {
     char current_title[MAX_TEXT_LEN];
     PageContent page;
     int selected_link;
+    int selected_idx;
     int scroll_offset;
     bool exit_app;
 } AppContext;
