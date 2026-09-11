@@ -50,9 +50,7 @@ bool ui_init(UIContext* ctx) {
 
     // Check if running in applet mode (from album/hbmenu)
     AppletType at = appletGetAppletType();
-    ctx->applet_mode = (at == AppletType_LibraryApplet ||
-                        at == AppletType_LibraryAppletPhotoViewer ||
-                        at != AppletType_Application);
+    ctx->applet_mode = (at != AppletType_Application);
 
     ctx->needs_redraw = true;
     return true;
