@@ -30,7 +30,7 @@ bool ui_init(UIContext* ctx) {
 
     // Load Switch shared font
     PlFontData font_data;
-    Result rc = plGetSharedFont(PlSharedFontType_Standard, &font_data);
+    Result rc = plGetSharedFontByType(&font_data, PlSharedFontType_Standard);
     if (R_FAILED(rc)) return false;
 
     SDL_RWops* rw = SDL_RWFromMem(font_data.address, font_data.size);
